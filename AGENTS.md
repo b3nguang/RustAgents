@@ -58,6 +58,36 @@ This file provides guidance to AI agents when working with code in this reposito
 - Use `pretty_assertions::assert_eq` in tests for clearer diffs. Import it at the top of the test module if it isn't already.
 - Avoid mutating process environment (`std::env::set_var`, etc.) inside tests; prefer passing environment-derived flags or dependencies in from above to keep tests isolated and parallel-safe.
 
+## Logging and Output
+
+Maintain a strict split between **CLI output** (`println!` / `eprintln!`) and **diagnostic logs** (`tracing`). The rule of thumb: *if the user doesn't have to see it to use the command, it belongs in `tracing`*. Default log level should be `warn`, so `info!` / `debug!` stay silent unless the user opts in via `-v` / `-vv` / `RUST_LOG`. Aim for **"quiet on success"** — the Unix convention.
+
+**Use `println!` / `eprintln!` only when the output is unavoidable:**
+
+- **Requested data** — what the user literally ran the command to get (list tables, query results, exported content, help text).
+- **Actionable content the user must copy / type / visit** — OAuth URLs, callback prompts, interactive form fields, setup-wizard prompts.
+- **Hard errors** propagated back to the user with context (top-level error renderers, clap-side validation errors).
+- **Interactive UI output** — REPL command output, streaming content, prompts, status indicators the user is actively watching.
+- Use `stdout` (`println!`) for parseable output a script might consume; `stderr` (`eprintln!`) for prompts, live UI, and error messages.
+
+**Use `tracing` for everything else:**
+
+- `error!` — unrecoverable failure about to propagate up as an error. Rare; `?` usually already carries the info.
+- `warn!` — recoverable fallback the user should know about by default: failed cleanup continuing anyway, rollback after a failure, probe couldn't reach a target.
+- `info!` — lifecycle signposts users *can* see with `-v`: "added X to config", "connected to Y", "resuming session Z", "exported to path". The "quiet success" level — no output at default verbosity.
+- `debug!` — module-level diagnostics: expected fallback paths, reconnect attempts, raw protocol/parse details.
+
+**Never mix the two:**
+
+- Don't `eprintln!` a fallback notice when the actionable info is already printed — users can copy it; the notice is noise. Use `tracing::debug!`.
+- Don't `tracing::info!` a command's primary output — users would need `-v` to see what they asked for.
+- Don't `tracing::warn!` something that isn't a warning. Lifecycle signposts are `info!`, not `warn!`.
+- `ok:`-style success confirmations ("added", "removed", "connected", "saved") are `info!`, not `println!` — the exit code already conveys success; don't re-echo what the user just ran.
+
+**Drop redundant preambles.** If a progress line is immediately followed by the actionable info, cut the preamble. "Opening browser..." then the URL is noise; just print the URL.
+
+**Honor opt-in visibility flags.** When a config flag explicitly requests visible output (e.g. `show_session_id_on_create`), emit via `println!` / `eprintln!` — don't silently demote it to `info!` and force `-v`.
+
 ## Changelog
 
 - Update `CHANGELOG.md` after every meaningful change (new features, bug fixes, breaking changes, deprecations, removals)
